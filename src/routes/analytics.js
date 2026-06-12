@@ -48,12 +48,12 @@ router.get("/", (req, res) => {
   const open_rate =
     total_sent > 0
       ? ((total_opened / total_sent) * 100).toFixed(1)
-      : 0;
+      : "0.0";
 
   const click_rate =
     total_sent > 0
       ? ((total_clicked / total_sent) * 100).toFixed(1)
-      : 0;
+      : "0.0";
 
   const byChannel = db.prepare(`
     SELECT
