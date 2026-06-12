@@ -82,5 +82,17 @@ customers.forEach(customer => {
   const campaign = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(id);
   res.status(201).json(campaign);
 });
+router.get("/:id/communications", (req, res) => {
+  const communications = db
+    .prepare(`
+      SELECT *
+      FROM communications
+      WHERE campaign_id = ?
+      ORDER BY created_at DESC
+    `)
+    .all(req.params.id);
+
+  res.json(communications);
+});
 
 export default router;
