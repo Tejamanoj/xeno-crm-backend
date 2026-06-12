@@ -45,6 +45,16 @@ router.get("/", (req, res) => {
     `)
     .get().c;
 
+  const open_rate =
+    total_sent > 0
+      ? ((total_opened / total_sent) * 100).toFixed(1)
+      : 0;
+
+  const click_rate =
+    total_sent > 0
+      ? ((total_clicked / total_sent) * 100).toFixed(1)
+      : 0;
+
   const byChannel = db.prepare(`
     SELECT
       channel,
@@ -68,6 +78,8 @@ router.get("/", (req, res) => {
     total_opened,
     total_clicked,
     total_failed,
+    open_rate,
+    click_rate,
     byChannel,
   });
 });
