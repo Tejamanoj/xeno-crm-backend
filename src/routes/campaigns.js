@@ -4,6 +4,9 @@ import { v4 as uuid } from "uuid";
 import { sendToChannelService } from "../services/channelService.js";
 
 const router = express.Router();
+router.get("/test", (req, res) => {
+  res.json({ message: "campaign route works" });
+});
 
 router.get("/", (req, res) => {
   const campaigns = db.prepare("SELECT * FROM campaigns ORDER BY created_at DESC").all();
