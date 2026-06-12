@@ -46,6 +46,15 @@ db.exec(`
     status TEXT DEFAULT 'sent',
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS orders (
+    id TEXT PRIMARY KEY,
+    customer_id TEXT NOT NULL,
+    customer_name TEXT,
+    amount REAL NOT NULL,
+    status TEXT DEFAULT 'Delivered',
+    created_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 export default db;
