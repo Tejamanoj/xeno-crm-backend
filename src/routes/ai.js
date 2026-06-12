@@ -7,6 +7,8 @@ router.post("/generate", async (req, res) => {
   try {
     const { prompt } = req.body;
 
+    console.log("AI REQUEST RECEIVED:", prompt);
+
     if (!process.env.OPENAI_API_KEY) {
       return res.status(500).json({
         error: "OPENAI_API_KEY not found",
@@ -48,6 +50,8 @@ Return ONLY valid JSON in this format:
     const result = JSON.parse(
       completion.choices[0].message.content
     );
+
+    console.log("AI RESPONSE:", result);
 
     res.json(result);
   } catch (error) {
