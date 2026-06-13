@@ -22,6 +22,7 @@ db.exec(`
     name TEXT NOT NULL,
     description TEXT,
     channel TEXT DEFAULT 'Email',
+    rules TEXT DEFAULT '{}',
     created_at TEXT DEFAULT (datetime('now'))
   );
 
