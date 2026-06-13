@@ -4,98 +4,119 @@ import { v4 as uuid } from "uuid";
 import { sendToChannelService } from "../services/channelService.js";
 
 const router = express.Router();
-router.get("/test", (req, res) => {
+
+// ─── Helper: build live stats from communications rows ────────────────────────
+function liveStats(campaignId) {
+  const comms = db
+    .prepare("SELECT * FROM communications WHERE campaign_id = ?")
+    .all(campaignId);
+  return {
+    sent:    comms.length,
+    opened:  comms.filter((x) => ["opened", "clicked"].includes(x.status)).length,
+    clicked: comms.filter((x) => x.status === "clicked").length,
+    failed:  comms.filter((x) => x.status === "failed").length,
+  };
+}
+
+// ─── GET /api/campaigns/test ──────────────────────────────────────────────────
+router.get("/test", (_req, res) => {
   res.json({ message: "campaign route works" });
 });
 
-router.get("/", (req, res) => {
-  const campaigns = db.prepare("SELECT * FROM campaigns ORDER BY created_at DESC").all();
-  const result = campaigns.map(c => {
-    const comms = db.prepare("SELECT * FROM communications WHERE campaign_id = ?").all(c.id);
-    return {
-      ...c,
-      sent:    comms.length,
-      opened:  comms.filter(x => ["opened","clicked"].includes(x.status)).length,
-      clicked: comms.filter(x => x.status === "clicked").length,
-      failed:  comms.filter(x => x.status === "failed").length,
-    };
-  });
-  res.json(result);
+// ─── GET /api/campaigns ───────────────────────────────────────────────────────
+// Returns every campaign with live sent/opened/clicked/failed counts derived
+// from the communications table — so the Campaigns page always reflects reality.
+router.get("/", (_req, res) => {
+  try {
+    const campaigns = db
+      .prepare("SELECT * FROM campaigns ORDER BY created_at DESC")
+      .all();
+
+    const result = campaigns.map((c) => ({ ...c, ...liveStats(c.id) }));
+    res.json(result);
+  } catch (error) {
+    console.error("CAMPAIGNS GET ERROR:", error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
+// ─── POST /api/campaigns ──────────────────────────────────────────────────────
+// 1. Creates the campaign row (status = 'sending').
+// 2. Fetches every customer in the target segment (or all customers if none).
+// 3. Inserts one communications row per customer with a simulated open/click status.
+// 4. Marks campaign as 'completed' and returns it with live counts.
 router.post("/", (req, res) => {
   const { name, segment_name, channel = "Email", message } = req.body;
-  if (!name) return res.status(400).json({ error: "Name required" });
-  const id = uuid();
-  db.prepare(`
-    INSERT INTO campaigns (id, name, segment_name, channel, message, status)
-    VALUES (?, ?, ?, ?, ?, 'sending')
-  `).run(id, name, segment_name || "All", channel, message || "");
+  if (!name) return res.status(400).json({ error: "Campaign name is required" });
 
-  const customers = segment_name
-    ? db.prepare("SELECT * FROM customers WHERE segment = ?").all(segment_name)
-    : db.prepare("SELECT * FROM customers").all();
+  try {
+    const id = uuid();
 
-customers.forEach(customer => {
-  const commId = uuid();
-  const personalised = (message || "").replace("{name}", customer.name);
+    // Step 1: create campaign
+    db.prepare(`
+      INSERT INTO campaigns (id, name, segment_name, channel, message, status)
+      VALUES (?, ?, ?, ?, ?, 'sending')
+    `).run(id, name, segment_name || "All", channel, message || "");
 
-  const random = Math.random();
+    // Step 2: resolve target customers
+    const customers = segment_name
+      ? db.prepare("SELECT * FROM customers WHERE segment = ?").all(segment_name)
+      : db.prepare("SELECT * FROM customers").all();
 
-  let status = "sent";
+    // Step 3: insert one communication per customer
+    const insertComm = db.prepare(`
+      INSERT INTO communications (id, campaign_id, customer_id, customer_name, channel, message, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
 
-  if (random > 0.8) {
-    status = "clicked";
-  } else if (random > 0.4) {
-    status = "opened";
-  } else if (random < 0.05) {
-    status = "failed";
+    customers.forEach((customer) => {
+      const commId      = uuid();
+      const personalised = (message || "").replace("{name}", customer.name);
+
+      // Simulate realistic engagement: 20 % click, 40 % open-only, 5 % fail, rest sent
+      const rand = Math.random();
+      const status =
+        rand > 0.8  ? "clicked" :
+        rand > 0.4  ? "opened"  :
+        rand < 0.05 ? "failed"  : "sent";
+
+      insertComm.run(commId, id, customer.id, customer.name, channel, personalised, status);
+
+      // Fire-and-forget to the channel service; errors are non-fatal
+      try {
+        sendToChannelService({
+          commId,
+          campaignId: id,
+          customer,
+          message: personalised,
+          channel,
+        });
+      } catch (svcErr) {
+        console.warn("channelService error (non-fatal):", svcErr.message);
+      }
+    });
+
+    // Step 4: mark completed and return with live counts
+    db.prepare("UPDATE campaigns SET status = 'completed' WHERE id = ?").run(id);
+
+    const campaign = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(id);
+    res.status(201).json({ ...campaign, ...liveStats(id) });
+  } catch (error) {
+    console.error("CAMPAIGNS POST ERROR:", error);
+    res.status(500).json({ error: error.message });
   }
-
-  db.prepare(`
-    INSERT INTO communications (
-      id,
-      campaign_id,
-      customer_id,
-      customer_name,
-      channel,
-      message,
-      status
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    commId,
-    id,
-    customer.id,
-    customer.name,
-    channel,
-    personalised,
-    status
-  );
-
-  sendToChannelService({
-    commId,
-    campaignId: id,
-    customer,
-    message: personalised,
-    channel
-  });
 });
 
-  const campaign = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(id);
-  res.status(201).json(campaign);
-});
+// ─── GET /api/campaigns/:id/communications ────────────────────────────────────
 router.get("/:id/communications", (req, res) => {
-  const communications = db
-    .prepare(`
-      SELECT *
-      FROM communications
-      WHERE campaign_id = ?
-      ORDER BY created_at DESC
-    `)
-    .all(req.params.id);
-
-  res.json(communications);
+  try {
+    const communications = db
+      .prepare("SELECT * FROM communications WHERE campaign_id = ? ORDER BY created_at DESC")
+      .all(req.params.id);
+    res.json(communications);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 export default router;
