@@ -65,7 +65,14 @@ router.get("/", (req, res) => {
           THEN 1
           ELSE 0
         END
-      ) as opened
+      ) as opened,
+      SUM(
+        CASE
+          WHEN status = 'clicked'
+          THEN 1
+          ELSE 0
+        END
+      ) as clicked
     FROM communications
     GROUP BY channel
   `).all();
@@ -84,7 +91,7 @@ router.get("/", (req, res) => {
   });
 });
 
-// Dashboard Trend Graph
+// Dashboard Trend Graph — includes clicked count for the Click Through Rate chart
 router.get("/trend", (req, res) => {
   const trend = db.prepare(`
     SELECT
@@ -96,7 +103,14 @@ router.get("/trend", (req, res) => {
           THEN 1
           ELSE 0
         END
-      ) as opened
+      ) as opened,
+      SUM(
+        CASE
+          WHEN status = 'clicked'
+          THEN 1
+          ELSE 0
+        END
+      ) as clicked
     FROM communications
     GROUP BY date(created_at)
     ORDER BY date(created_at)
